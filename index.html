@@ -134,6 +134,8 @@ const MEMORIES = [
 let state = {
   apiKey: localStorage.getItem('sd_api_key') ? atob(localStorage.getItem('sd_api_key')) : null,
   ghToken: localStorage.getItem('sd_gh_token') ? atob(localStorage.getItem('sd_gh_token')) : null,
+  dsKey: localStorage.getItem('sd_ds_key') ? atob(localStorage.getItem('sd_ds_key')) : null,
+  proxyUrl: localStorage.getItem('sd_proxy_url') || null,
   model: localStorage.getItem('sd_model') || 'deepseek/deepseek-v4-pro',
   skillContent: null, skillSha: null, skillLoaded: false,
   loadedMemories: {}, messages: [], pendingUpdate: null
@@ -223,7 +225,9 @@ async function toggleMemory(file, label, btn) {
 
 // ================= 对话 =================
 async function sendMessage() {
-  if (!state.apiKey) { addSystemMsg('❌ 请先在「设置」填 OpenRouter API Key'); return; }
+  const direct = (state.model||'').startsWith('direct:');
+  if (direct && (!state.dsKey || !state.proxyUrl)) { addSystemMsg('❌ 官方直连模式需要在「设置」填 ② DeepSeek Key 和 ③ 中转站地址'); return; }
+  if (!direct && !state.apiKey) { addSystemMsg('❌ 请先在「设置」填 OpenRouter API Key'); return; }
   if (!state.skillLoaded) { addSystemMsg('❌ 规则库未加载（检查 GitHub 令牌后刷新页面）'); return; }
   const input = document.getElementById('user-input');
   const text = input.value.trim();
@@ -239,12 +243,17 @@ async function sendMessage() {
     const sys = '你是 Seedance 2.0 视频提示词专家，严格按以下规则工作。\n\n=== 规则库 ===\n' + ctx +
       '\n\n=== 指令 ===\n1. 按用户需求生成可直接复制到即梦平台的中文提示词\n2. 适用时提供2-3个版本\n' +
       '3. 当用户要求更新/修改/增加规则时，正常回答后，在末尾用如下格式输出更新后的完整 SKILL.md：\n```skill-update\n<完整文件内容>\n```';
-    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json','Authorization':'Bearer '+state.apiKey,'HTTP-Referer':location.href,'X-Title':'Seedance Workbench' },
-      body: JSON.stringify({ model: state.model, max_tokens: 16384, temperature: 0.7,
-        messages: [{role:'system',content:sys}, ...state.messages, {role:'user',content:text}] })
-    });
+    const r = await fetch(direct
+      ? (state.proxyUrl + '/v1/chat/completions')
+      : 'https://openrouter.ai/api/v1/chat/completions',
+      { method:'POST',
+        headers: direct
+          ? {'Content-Type':'application/json','Authorization':'Bearer '+state.dsKey}
+          : {'Content-Type':'application/json','Authorization':'Bearer '+state.apiKey,'HTTP-Referer':location.href,'X-Title':'Seedance Workbench'},
+        body: JSON.stringify({ model: direct ? state.model.replace('direct:','') : state.model,
+          max_tokens: direct ? 8192 : 16384, temperature: 0.7,
+          messages: [{role:'system',content:sys}, ...state.messages, {role:'user',content:text}] })
+      });
     if (!r.ok) throw new Error('AI 接口错误 ' + r.status + ': ' + (await r.text()).slice(0,200));
     const reply = (await r.json()).choices[0].message.content;
     const m = reply.match(/```skill-update\n([\s\S]*?)```/);
@@ -296,16 +305,24 @@ function openSettings() {
     <label>① OpenRouter API Key（AI 对话用）</label>
     <input type="password" id="s-key" value="${state.apiKey||''}" placeholder="sk-or-v1-...">
     <small>申请: <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a> · 只存在本浏览器</small>
-    <label>② GitHub 令牌（读写你的私有规则库）</label>
+    <label>② DeepSeek 官方 Key（只想付 DeepSeek 钱时填，与①二选一）</label>
+    <input type="password" id="s-ds" value="${state.dsKey||''}" placeholder="sk-...（platform.deepseek.com 申请）">
+    <small>需搭配下面③的中转站使用 · 只存在本浏览器</small>
+    <label>③ 中转站地址（配合②，免费 Cloudflare Worker）</label>
+    <input type="text" id="s-proxy" value="${state.proxyUrl||''}" placeholder="https://xxx.workers.dev">
+    <small>搭建教程见仓库 README 和 deepseek-cors-proxy.js</small>
+    <label>④ GitHub 令牌（读写你的私有规则库）</label>
     <input type="password" id="s-gh" value="${state.ghToken||''}" placeholder="github_pat_...">
     <small>申请: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">github.com/settings/personal-access-tokens/new</a><br>
     Repository access 选 Only select repositories → fenjing<br>Permissions → Contents → <b>Read and write</b></small>
-    <label>③ 模型</label>
+    <label>⑤ 模型</label>
     <select id="s-model">
-      <option value="deepseek/deepseek-v4-pro">DeepSeek V4 Pro [1M上下文] ★推荐</option>
-      <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash (免费)</option>
-      <option value="deepseek/deepseek-chat-v3-0324">DeepSeek V3</option>
-      <option value="anthropic/claude-sonnet-4">Claude Sonnet 4</option>
+      <option value="direct:deepseek-chat">DeepSeek官方直连 · 对话模型 [只付DeepSeek·需填②③]</option>
+      <option value="direct:deepseek-reasoner">DeepSeek官方直连 · 深度思考 [只付DeepSeek·需填②③]</option>
+      <option value="deepseek/deepseek-v4-pro">OpenRouter · DeepSeek V4 Pro [1M·同价]</option>
+      <option value="openrouter/free">OpenRouter · 自动免费模型 [0元·50次/天]</option>
+      <option value="meta-llama/llama-3.3-70b-instruct:free">OpenRouter · Llama 3.3 70B [0元]</option>
+      <option value="anthropic/claude-sonnet-4">OpenRouter · Claude Sonnet 4</option>
     </select>
     <div class="btns">
       <button class="secondary" onclick="this.closest('.modal-overlay').remove()">取消</button>
@@ -318,9 +335,13 @@ function openSettings() {
 }
 function saveSettings(btn) {
   const k = document.getElementById('s-key').value.trim();
+  const d = document.getElementById('s-ds').value.trim();
+  const p = document.getElementById('s-proxy').value.trim();
   const g = document.getElementById('s-gh').value.trim();
   const m = document.getElementById('s-model').value;
   if (k) { state.apiKey = k; localStorage.setItem('sd_api_key', btoa(k)); }
+  if (d) { state.dsKey = d; localStorage.setItem('sd_ds_key', btoa(d)); }
+  if (p) { state.proxyUrl = p.replace(/\/+$/,''); localStorage.setItem('sd_proxy_url', state.proxyUrl); }
   if (g) { state.ghToken = g; localStorage.setItem('sd_gh_token', btoa(g)); }
   state.model = m; localStorage.setItem('sd_model', m);
   btn.closest('.modal-overlay').remove();
