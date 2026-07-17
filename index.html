@@ -80,7 +80,7 @@ body.ready #app{display:grid}
   <aside id="sidebar">
     <div class="head">
       <h2>Seedance Workbench</h2>
-      <span class="ver">v4.1 · 铁律指令+自动质检官</span>
+      <span class="ver">v5.0 · 导演工作手册</span>
     </div>
     <nav>
       <div id="memory-list"></div>
@@ -119,16 +119,12 @@ const APP_PASSWORD = '5951395';
 const MODES = {
   fenjing: {
     name: '🎬 剧本分镜',
-    files: [
-      ['seedance-preflight-checklist','强制门禁系统'],
-      ['seedance-agent-blueprint','Agent 蓝图'],
-      ['cinematic-shot-encyclopedia','100种镜头'],
-      ['seedance-lighting-filters-guide','布光滤镜'],
-      ['seedance-atmospheric-realism','大气真实感'],
-      ['seedance-prompt-style-guide','风格指南'],
-      ['seedance-lessons-from-test','实测教训'],
-      ['libtv-e09-test-feedback','E09生图教训']],
-    directive: '当前模式：剧本分镜。以下是铁律，违反任何一条视为任务失败：(1)严格分阶段推进，每次回复只完成一个阶段，到达暂停点必须停下等用户确认，禁止把多个阶段合并在一次回复；(2)阶段一必须完整输出全部六项：剧种识别、全剧故事脉络、人物关系图、场景频次分析、开篇钩子提案（从钩子类型库选定类型+给出具体画面）、结尾悬念提案（悬念三式选一+给出具体画面）；(3)写分镜时每段必须先输出段头信息——空间俯视图（空间形状/角色站位/光源定位/机位）、布光七变量决策、本段情感核心与表演决策，然后才允许输出分镜列表；(4)每个分镜必须含全部9字段：画面描述/景别/光影/音效/运镜调度/配音角色/台词/推荐时长/即梦提示词，缺一个字段即为不合格；(5)每次输出的末尾必须附【门禁自检回执】区块——逐项列出本次适用的门禁检查项及✓/✗状态，出现✗必须当场补齐后再交付；(6)输出长度不设限，宁长勿缺，禁止用"同上""略"等方式省略内容。'
+    files: [],
+    directive: `你不用告诉用户你在执行什么步骤、检查什么规则。你是一个短剧分镜导演。用户给你剧本，你就拆；用户确认，你就出资产；用户说开始，你就写分镜。永远直接给结果。
+
+分镜阶段默认一次只写一段15秒。每段必须先给段头信息（本段核心+空间俯视+布光）。然后每个镜头严格按9字段卡片格式输出。写实三件套、VFX四层、180°轴线、音频三层——这些是你的本能，做在结果里，不用说在做。写完自觉扫一眼纠错，有错当场改，不说"补丁/修正"等字眼。
+
+输出的格式用时间戳分镜法。干净交付。`
   },
   youhua: {
     name: '✨ 提示词优化',
@@ -313,13 +309,7 @@ async function sendMessage() {
           messages: [{role:'system',content:sys}, ...state.messages, {role:'user',content:text}] })
       });
     if (!r.ok) throw new Error('AI 接口错误 ' + r.status + ': ' + (await r.text()).slice(0,200));
-    let reply = (await r.json()).choices[0].message.content;
-    if (state.mode === 'fenjing' && reply.length > 300) {
-      thinking.textContent = '🔍 质检中...';
-      thinking.classList.add('loading');
-      reply = await autoReview(reply);
-      thinking.classList.remove('loading');
-    }
+    const reply = (await r.json()).choices[0].message.content;
     const m = reply.match(/```skill-update\n([\s\S]*?)```/);
     thinking.classList.remove('loading');
     if (m) {
@@ -332,80 +322,6 @@ async function sendMessage() {
   } catch(e) { thinking.classList.remove('loading'); thinking.textContent = '❌ ' + e.message; }
   document.getElementById('send-btn').disabled = false;
   scrollDown();
-}
-
-// ================= 自动质检官（分镜模式专用） =================
-async function autoReview(firstReply) {
-  if (state.mode !== 'fenjing') return firstReply; // 仅分镜模式启用
-  if (firstReply.length < 300) return firstReply; // 太短，不是分镜输出，跳过
-  const reviewPrompt = `你是 Seedance 分镜质量检查官。请对下面的 AI 输出进行逐项审查，输出两段：
-
-【审查结论】: PASS（全部通过）或 FAIL（有缺项）
-
-如果 FAIL，按以下格式列出缺失项：
-【缺失项清单】: (1) ... (2) ...
-
-审查标准：
-1. 是否分阶段推进？是否在一个阶段结束后明确写"请确认后进入下一阶段"？
-2. 如果是阶段一，是否包含：剧种识别、全剧故事脉络、人物关系图、场景频次分析、开篇钩子提案（含具体画面）、结尾悬念提案（含具体画面）？
-3. 如果是分镜输出，每个镜头是否包含全部 9 字段（画面描述/景别/光影/音效/运镜/配音/台词/时长/即梦提示词）？
-4. 段头信息是否包含空间俯视图和布光决策？
-5. 末尾是否有【门禁自检回执】？
-
-以下是待审查的 AI 输出：
----
-${firstReply.slice(0, 8000)}
----`;
-
-  try {
-    const direct = (state.model||'').startsWith('direct:');
-    const r = await fetch(direct
-      ? (state.proxyUrl + '/v1/chat/completions')
-      : 'https://openrouter.ai/api/v1/chat/completions',
-      { method:'POST',
-        headers: direct
-          ? {'Content-Type':'application/json','Authorization':'Bearer '+state.dsKey}
-          : {'Content-Type':'application/json','Authorization':'Bearer '+state.apiKey,'HTTP-Referer':location.href,'X-Title':'Seedance Reviewer'},
-        body: JSON.stringify({ model: direct ? state.model.replace('direct:','') : 'openrouter/free',
-          max_tokens: 2048, temperature: 0.1,
-          messages: [{role:'user',content:reviewPrompt}] })
-      });
-    if (!r.ok) return firstReply;
-    const verdict = (await r.json()).choices[0].message.content;
-    if (verdict.includes('【审查结论】: PASS')) {
-      addSystemMsg('✅ 质检通过');
-      return firstReply;
-    }
-    // FAIL: auto-fix
-    addSystemMsg('⚠️ 质检发现缺口，正在自动补齐...');
-    const fixPrompt = `需要对以下分镜输出进行补充。根据审查反馈，补齐所有缺失的内容。
-
-【审查反馈】:
-${verdict.slice(0, 2000)}
-
-【原始输出】:
-${firstReply.slice(0, 6000)}
-
-请生成【补充内容】——将审查反馈中列出的缺失项全部补齐。直接输出补充内容，格式与原始输出保持一致。不需要重复原始输出中已有的部分。`;
-    const f = await fetch(direct
-      ? (state.proxyUrl + '/v1/chat/completions')
-      : 'https://openrouter.ai/api/v1/chat/completions',
-      { method:'POST',
-        headers: direct
-          ? {'Content-Type':'application/json','Authorization':'Bearer '+state.dsKey}
-          : {'Content-Type':'application/json','Authorization':'Bearer '+state.apiKey,'HTTP-Referer':location.href,'X-Title':'Seedance Fixer'},
-        body: JSON.stringify({ model: direct ? state.model.replace('direct:','') : state.model,
-          max_tokens: 8192, temperature: 0.2,
-          messages: [{role:'user',content:fixPrompt}] })
-      });
-    if (!f.ok) return firstReply;
-    const supplement = (await f.json()).choices[0].message.content;
-    addSystemMsg('✅ 补齐完成');
-    return firstReply + '\n\n---\n## 【质检补全】\n' + supplement;
-  } catch(e) {
-    addSystemMsg('⚠️ 质检/补全调用异常: ' + e.message);
-    return firstReply;
-  }
 }
 function showUpdateCard() {
   const div = document.createElement('div');
