@@ -80,7 +80,7 @@ body.ready #app{display:grid}
   <aside id="sidebar">
     <div class="head">
       <h2>Seedance Workbench</h2>
-      <span class="ver">v3.4 · 分类记忆库+风格预设</span>
+      <span class="ver">v4.0 · 双模式工作台</span>
     </div>
     <nav>
       <div id="memory-list"></div>
@@ -99,8 +99,8 @@ body.ready #app{display:grid}
     <div id="messages">
       <div class="msg system">=== Seedance 2.0 视频提示词工作台 ===
 描述你想要的视频，AI 按你的私有规则库生成即梦提示词。
-对话中说「更新规则：XXX」可让 AI 修改规则并一键推送回 GitHub。
-首次使用请点左下角「设置」填入两个密钥。</div>
+📍 请先在左侧选择工作模式（🎬 剧本分镜 或 ✨ 提示词优化）。
+对话中说「更新规则：XXX」可让 AI 修改规则并一键推送回 GitHub。</div>
     </div>
     <div id="input-area">
       <textarea id="user-input" placeholder="例如：一段15秒的赛博朋克风格打斗场景..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
@@ -116,24 +116,33 @@ const GH_OWNER = 'yehuimei18-source';
 const GH_REPO  = 'fenjing';               // 私有内容仓库
 const SKILL_PATH = 'skills/seedance/SKILL.md';
 const APP_PASSWORD = '5951395';
-const MEMORIES_GROUPS = [
-  { title:'🎬 核心流程（写分镜必载）', items:[
-    ['seedance-preflight-checklist','强制门禁系统'],
-    ['seedance-agent-blueprint','Agent 蓝图·完整工作流']]},
-  { title:'📷 镜头·布光·质感', items:[
-    ['cinematic-shot-encyclopedia','100种镜头类型'],
-    ['seedance-lighting-filters-guide','布光与滤镜指南'],
-    ['seedance-atmospheric-realism','大气真实感方法']]},
-  { title:'📚 知识库', items:[
-    ['seedance-prompt-style-guide','提示词风格指南'],
-    ['seedance-prompt-techniques-research','技巧研究汇总'],
-    ['seedance-project-map','项目逻辑地图'],
-    ['emerging-visual-styles-library','视觉风格库']]},
-  { title:'⚠️ 实测教训', items:[
-    ['seedance-lessons-from-test','三轮实测反馈修正'],
-    ['libtv-e09-test-feedback','E09生图翻车教训']]}
-];
-const BUNDLE = ['seedance-preflight-checklist','seedance-agent-blueprint','cinematic-shot-encyclopedia','seedance-lighting-filters-guide','seedance-lessons-from-test'];
+const MODES = {
+  fenjing: {
+    name: '🎬 剧本分镜',
+    files: [
+      ['seedance-preflight-checklist','强制门禁系统'],
+      ['seedance-agent-blueprint','Agent 蓝图'],
+      ['cinematic-shot-encyclopedia','100种镜头'],
+      ['seedance-lighting-filters-guide','布光滤镜'],
+      ['seedance-atmospheric-realism','大气真实感'],
+      ['seedance-prompt-style-guide','风格指南'],
+      ['seedance-lessons-from-test','实测教训'],
+      ['libtv-e09-test-feedback','E09生图教训']],
+    directive: '当前模式：剧本分镜。用户会提供剧本或场景描述。严格按 Agent 蓝图完整工作流执行：先剧种识别与门禁零（类型/画幅/风格确认），暂停等用户确认；确认后输出资产包（角色卡/场景卡/一致性表）再暂停；用户明确说开始写分镜后才输出分镜，默认每次只出一段15秒，每段输出后过门禁自检清单。'
+  },
+  youhua: {
+    name: '✨ 提示词优化',
+    files: [
+      ['prompt-optimization-system','摄影质感优化体系（核心）'],
+      ['seedance-prompt-style-guide','风格指南'],
+      ['seedance-prompt-techniques-research','技巧研究'],
+      ['cinematic-shot-encyclopedia','100种镜头'],
+      ['seedance-lighting-filters-guide','布光滤镜'],
+      ['seedance-atmospheric-realism','大气真实感'],
+      ['seedance-lessons-from-test','实测教训']],
+    directive: '当前模式：提示词优化。用户会提供已有的提示词（视频提示词、角色/场景/道具提示词均可）。混合触发逻辑：(1)如果是简单的角色/场景/道具描述→按「摄影质感优化体系」六步流程增强：辨识度锚点+中式审美具象翻译+VPEP材质物理+使用痕迹+摄影质感模块（相机/镜头/胶片型号），核心原则「这是一张照片不是CG」——禁止抽象形容词，用正向物理参数替代负面指令，每个细节有叙事逻辑；(2)如果是视频分镜提示词或生成失败描述→先对照诊断树命名根因再优化。两种情况都输出：完整优化后提示词+两三行改动说明。不走完整分镜流程，不输出资产包。'
+  }
+};
 const STYLES = [
   ['韩剧氛围感','2700-3200K暖调柔光，50-85mm中长焦，缓慢推近，双人紧凑构图浅景深，逆光发丝金边'],
   ['诺兰写实','5600K冷调高对比，广角与长焦交替，手持微晃，极简留白构图，自然光'],
@@ -151,6 +160,7 @@ let state = {
   dsKey: localStorage.getItem('sd_ds_key') ? atob(localStorage.getItem('sd_ds_key')) : null,
   proxyUrl: localStorage.getItem('sd_proxy_url') || null,
   model: localStorage.getItem('sd_model') || 'deepseek/deepseek-v4-pro',
+  mode: null,
   skillContent: null, skillSha: null, skillLoaded: false,
   loadedMemories: {}, messages: [], pendingUpdate: null
 };
@@ -214,48 +224,44 @@ async function refreshSkill() {
 function renderMemoryList() {
   const box = document.getElementById('memory-list');
   box.innerHTML = '';
-  const bb = document.createElement('button');
-  bb.textContent = '🍱 一键加载·分镜全家桶';
-  bb.style.color = 'var(--accent)';
-  bb.style.fontWeight = '600';
-  bb.onclick = loadBundle;
-  box.appendChild(bb);
-  for (const g of MEMORIES_GROUPS) {
-    const h = document.createElement('h3');
-    h.textContent = g.title;
-    box.appendChild(h);
-    for (const [file, label] of g.items) {
-      const b = document.createElement('button');
-      b.innerHTML = '<span class="dot"></span> ' + label;
-      b.dataset.file = file;
-      b.onclick = () => toggleMemory(file, label, b);
-      box.appendChild(b);
-    }
+  box.style.padding = '12px';
+  for (const [key, mode] of Object.entries(MODES)) {
+    const b = document.createElement('button');
+    b.style.cssText = 'padding:14px 16px;margin-bottom:10px;border-radius:10px;border:2px solid var(--border);background:var(--surface);text-align:center;width:100%;font-size:.95em;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px';
+    b.innerHTML = '<span style="font-size:1.4em">' + (key==='fenjing'?'🎬':'✨') + '</span><span>' + mode.name + '</span><span style="font-size:.7em;color:var(--muted);font-weight:400">' + mode.files.length + ' 项自动加载</span>';
+    b.onclick = () => setMode(key);
+    if (state.mode === key) { b.style.borderColor = 'var(--accent2)'; b.style.background = '#1e1e30'; }
+    box.appendChild(b);
   }
-  const hs = document.createElement('h3');
-  hs.textContent = '🎨 风格预设（点击插入输入框）';
-  box.appendChild(hs);
+  const h = document.createElement('h3');
+  h.textContent = '🎨 风格预设（可叠加）';
+  box.appendChild(h);
   for (const [name, desc] of STYLES) {
     const b = document.createElement('button');
-    b.textContent = '✨ ' + name;
+    b.innerHTML = '<span class="dot"></span> ' + name;
     b.onclick = () => {
       const ta = document.getElementById('user-input');
       ta.value = (ta.value ? ta.value + '\n' : '') + '【风格预设·' + name + '】' + desc;
       ta.focus();
-      addSystemMsg('🎨 已插入风格预设: ' + name);
+      addSystemMsg('🎨 已插入: ' + name);
     };
     box.appendChild(b);
   }
 }
-async function loadBundle() {
-  addSystemMsg('🍱 正在加载分镜全家桶（5 项）...');
-  for (const file of BUNDLE) {
+async function setMode(modeKey) {
+  if (state.mode === modeKey) return;
+  const mode = MODES[modeKey];
+  state.mode = modeKey;
+  state.loadedMemories = {};
+  renderMemoryList();
+  addSystemMsg('🔄 切换到「' + mode.name + '」模式，自动加载 ' + mode.files.length + ' 项...');
+  for (const [file] of mode.files) {
     if (state.loadedMemories[file]) continue;
-    const btn = document.querySelector('button[data-file="' + file + '"]');
-    const item = MEMORIES_GROUPS.flatMap(g => g.items).find(x => x[0] === file);
-    await toggleMemory(file, item ? item[1] : file, btn);
+    try { state.loadedMemories[file] = await ghRead('memory/' + file + '.md'); }
+    catch(e) { addSystemMsg('⚠️ ' + file + ' 加载失败'); }
   }
-  addSystemMsg('🍱 全家桶就绪，开始写分镜吧');
+  addSystemMsg('✅「' + mode.name + '」就绪，开始对话吧');
+  setCtx('「' + mode.name + '」');
 }
 async function toggleMemory(file, label, btn) {
   if (state.loadedMemories[file]) {
@@ -276,9 +282,10 @@ async function toggleMemory(file, label, btn) {
 // ================= 对话 =================
 async function sendMessage() {
   const direct = (state.model||'').startsWith('direct:');
-  if (direct && (!state.dsKey || !state.proxyUrl)) { addSystemMsg('❌ 官方直连模式需要在「设置」填 ② DeepSeek Key 和 ③ 中转站地址'); return; }
+  if (direct && (!state.dsKey || !state.proxyUrl)) { addSystemMsg('❌ 官方直连模式需要「设置」中填 ② DeepSeek Key 和 ③ 中转站地址'); return; }
   if (!direct && !state.apiKey) { addSystemMsg('❌ 请先在「设置」填 OpenRouter API Key'); return; }
-  if (!state.skillLoaded) { addSystemMsg('❌ 规则库未加载（检查 GitHub 令牌后刷新页面）'); return; }
+  if (!state.mode) { addSystemMsg('📍 请先在左侧选择工作模式：🎬 剧本分镜 或 ✨ 提示词优化'); return; }
+  if (!state.skillLoaded) { addSystemMsg('❌ 规则库未加载'); return; }
   const input = document.getElementById('user-input');
   const text = input.value.trim();
   if (!text) return;
@@ -291,6 +298,7 @@ async function sendMessage() {
     let ctx = state.skillContent;
     for (const [name, c] of Object.entries(state.loadedMemories)) ctx += '\n\n--- 参考记忆: ' + name + ' ---\n' + c;
     const sys = '你是 Seedance 2.0 视频提示词专家，严格按以下规则工作。\n\n=== 规则库 ===\n' + ctx +
+      '\n\n=== 工作模式 ===\n' + MODES[state.mode].directive +
       '\n\n=== 指令 ===\n1. 按用户需求生成可直接复制到即梦平台的中文提示词\n2. 适用时提供2-3个版本\n' +
       '3. 当用户要求更新/修改/增加规则时，正常回答后，在末尾用如下格式输出更新后的完整 SKILL.md：\n```skill-update\n<完整文件内容>\n```';
     const r = await fetch(direct
