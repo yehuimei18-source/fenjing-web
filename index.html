@@ -119,7 +119,7 @@ const APP_PASSWORD = '5951395';
 const MODES = {
   fenjing: {
     name: '🎬 剧本分镜',
-    files: [],
+    files: [['__builtin__','全规则已内置在导演手册中']],
     directive: `你不用告诉用户你在执行什么步骤、检查什么规则。你是一个短剧分镜导演。用户给你剧本，你就拆；用户确认，你就出资产；用户说开始，你就写分镜。永远直接给结果。
 
 分镜阶段默认一次只写一段15秒。每段必须先给段头信息（本段核心+空间俯视+布光）。然后每个镜头严格按9字段卡片格式输出。写实三件套、VFX四层、180°轴线、音频三层——这些是你的本能，做在结果里，不用说在做。写完自觉扫一眼纠错，有错当场改，不说"补丁/修正"等字眼。
@@ -224,7 +224,8 @@ function renderMemoryList() {
   for (const [key, mode] of Object.entries(MODES)) {
     const b = document.createElement('button');
     b.style.cssText = 'padding:14px 16px;margin-bottom:10px;border-radius:10px;border:2px solid var(--border);background:var(--surface);text-align:center;width:100%;font-size:.95em;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px';
-    b.innerHTML = '<span style="font-size:1.4em">' + (key==='fenjing'?'🎬':'✨') + '</span><span>' + mode.name + '</span><span style="font-size:.7em;color:var(--muted);font-weight:400">' + mode.files.length + ' 项自动加载</span>';
+    const count = mode.files[0] && mode.files[0][0] === '__builtin__' ? '规则已内置' : mode.files.length + ' 项自动加载';
+    b.innerHTML = '<span style="font-size:1.4em">' + (key==='fenjing'?'🎬':'✨') + '</span><span>' + mode.name + '</span><span style="font-size:.7em;color:var(--muted);font-weight:400">' + count + '</span>';
     b.onclick = () => setMode(key);
     if (state.mode === key) { b.style.borderColor = 'var(--accent2)'; b.style.background = '#1e1e30'; }
     box.appendChild(b);
@@ -250,13 +251,16 @@ async function setMode(modeKey) {
   state.mode = modeKey;
   state.loadedMemories = {};
   renderMemoryList();
-  addSystemMsg('🔄 切换到「' + mode.name + '」模式，自动加载 ' + mode.files.length + ' 项...');
-  for (const [file] of mode.files) {
-    if (state.loadedMemories[file]) continue;
-    try { state.loadedMemories[file] = await ghRead('memory/' + file + '.md'); }
-    catch(e) { addSystemMsg('⚠️ ' + file + ' 加载失败'); }
+  const loadable = mode.files.filter(f => f[0] !== '__builtin__');
+  if (loadable.length > 0) {
+    addSystemMsg('🔄 切换到「' + mode.name + '」模式，自动加载 ' + loadable.length + ' 项...');
+    for (const [file] of loadable) {
+      if (state.loadedMemories[file]) continue;
+      try { state.loadedMemories[file] = await ghRead('memory/' + file + '.md'); }
+      catch(e) { addSystemMsg('⚠️ ' + file + ' 加载失败'); }
+    }
   }
-  addSystemMsg('✅「' + mode.name + '」就绪，开始对话吧');
+  addSystemMsg('✅「' + mode.name + '」就绪');
   setCtx('「' + mode.name + '」');
 }
 async function toggleMemory(file, label, btn) {
@@ -334,6 +338,15 @@ function showUpdateCard() {
 }
 async function pushUpdate(btn) {
   if (!state.pendingUpdate) return;
+  const oldLen = (state.skillContent||'').length;
+  const newLen = state.pendingUpdate.length;
+  if (newLen < oldLen * 0.5) {
+    if (!confirm('⚠️ 新内容(' + (newLen/1024).toFixed(1) + 'KB)比当前(' + (oldLen/1024).toFixed(1) + 'KB)缩小超过一半——可能是AI截断或覆盖错误。\n\n确定要推送吗？\n\n点「取消」回到对话，让AI重新生成。')) {
+      addSystemMsg('⚠️ 推送已取消。请让AI重新生成完整内容后再试。');
+      btn.textContent = '🚀 推送到 GitHub';
+      return;
+    }
+  }
   btn.disabled = true; btn.textContent = '⏳ 推送中...';
   try {
     const sha = await ghWrite(SKILL_PATH, state.pendingUpdate, 'web-update: ' + new Date().toLocaleString('zh-CN'));
@@ -422,6 +435,13 @@ function openUpdateRules() {
 }
 async function pushManualEdit(btn) {
   const content = document.getElementById('edit-skill').value;
+  const oldLen = (state.skillContent||'').length;
+  if (content.length < oldLen * 0.5) {
+    if (!confirm('⚠️ 即将推送的内容(' + (content.length/1024).toFixed(1) + 'KB)比当前版本(' + (oldLen/1024).toFixed(1) + 'KB)缩小超过一半。\n\n确定继续吗？')) {
+      addSystemMsg('⚠️ 推送已取消');
+      return;
+    }
+  }
   btn.disabled = true; btn.textContent = '⏳ 推送中...';
   try {
     const sha = await ghWrite(SKILL_PATH, content, 'manual-edit: ' + new Date().toLocaleString('zh-CN'));
