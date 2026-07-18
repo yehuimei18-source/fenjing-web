@@ -71,7 +71,7 @@ body.ready #app{display:grid}
 <div id="gate">
 <h1>🎬 Seedance 2.0</h1>
 <p>即梦视频提示词 · AI 工作台</p>
-<input type="password" id="pwd-input" placeholder="请输入密码" maxlength="20" onkeydown="if(event.key==='Enter')checkPassword()">
+<input type="password" id="pwd-input" placeholder="请输入密码" maxlength="20" autocomplete="off" name="seedance-gate-${Math.random().toString(36).slice(2)}" onkeydown="if(event.key==='Enter')checkPassword()">
 <button onclick="checkPassword()">进入</button>
 <div class="err" id="pwd-err">密码错误</div>
 </div>
@@ -195,7 +195,6 @@ async function ghWrite(path, content, message) {
 // ================= 初始化 =================
 function checkPassword() {
   if (document.getElementById('pwd-input').value.trim() === APP_PASSWORD) {
-    sessionStorage.setItem('sd_auth','1');
     document.body.classList.add('ready');
     boot();
   } else document.getElementById('pwd-err').style.display = 'block';
@@ -448,7 +447,13 @@ function setCtx(t) { document.getElementById('ctx-indicator').textContent = '规
 function scrollDown() { const m = document.getElementById('messages'); setTimeout(()=>m.scrollTop=m.scrollHeight,50); }
 
 // ================= 启动 =================
-if (sessionStorage.getItem('sd_auth')==='1') { document.body.classList.add('ready'); boot(); }
+// 每次打开页面强制弹出密码门，不依赖任何持久化标记
+window.addEventListener('pageshow', function() {
+  document.body.classList.remove('ready');
+  document.getElementById('pwd-input').value = '';
+  document.getElementById('pwd-input').focus();
+});
+
 </script>
 </body>
 </html>
